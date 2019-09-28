@@ -5,15 +5,15 @@ port = 9090
 
 clients = []
 
-s = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-s.bind((host,port))
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((host, port))
 
 quit = False
 print("[ Server Started ]")
 
 while not quit:
 	try:
-		data, addr = s.recvfrom(1024)
+		data, addr = sock.recvfrom(1024)
 
 		if addr not in clients:
 			clients.append(addr)
@@ -25,11 +25,11 @@ while not quit:
 
 		for client in clients:
 			if addr != client:
-				senddata = ("sender#" + str(clients.index(client))+"#").encode("UTF-8") + data
-				s.sendto(senddata, client)
+				send_data = ("sender#" + str(clients.index(client)) + "#").encode("UTF-8") + data
+				sock.sendto(send_data, client)
 			# s.sendto(data, client)
 	except:	
 		print("\n[ Server Stopped ]")
 		quit = True
 		
-s.close()
+sock.close()

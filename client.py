@@ -1,22 +1,25 @@
-import socket, threading, time, random, re
-import DH_Endpoint as dh
+import socket, threading, time, re
 
-key = 8194
+import DH_Endpoint as dh
+import util
+
+lock = threading.Lock()
+
 shutdown = False
 established = False
 join = False
 connected = False
-
-my_public = random.randint(1, 101)
-print("my pub = ", my_public)
-my_private = random.randint(1, 101)
-print("my prvt = ", my_private)
 
 opponent_public = 0
 opponent_partial = 0
 dh_endpoint = 0
 my_partial = 0
 full_key = 0
+
+my_public = util.get_random_key()
+print("my pub = ", my_public)
+my_private = util.get_random_key()
+print("my prvt = ", my_private)
 
 
 def establishE2E(name, sock):
@@ -28,6 +31,7 @@ def establishE2E(name, sock):
     global my_partial
     global full_key
 
+    lock.acquire()
     while not established:
         try:
             while True:
@@ -38,40 +42,40 @@ def establishE2E(name, sock):
                         and opponent_public == 0:
                     numbers = re.findall(r'\d+', data.decode("utf-8"))
                     opponent_public = int(numbers[1])
-                    print("PUBLIC opponent key : ", opponent_public)
-
+                    print("opponent's PUBLIC key : ", opponent_public)
 
                     order = int(re.findall(r'#\d+#', data.decode("utf-8"))[0].strip("#")) == 0
-                    print("ord", re.findall(r'#\d+#', data.decode("utf-8"))[0].strip("#"),"  ")
+                    # print("ord", re.findall(r'#\d+#', data.decode("utf-8"))[0].strip("#"),"  ")
                     dh_endpoint = dh.DH_Endpoint(my_public, opponent_public, my_private, order)
                     my_partial = dh_endpoint.generate_partial_key()
                     sock.sendto(("[" + alias + "] => user partial_key is " + str(my_partial)).encode("utf-8"), server)
                     # time.sleep(0.2)
                     connected = True
-                    continue
+                    # continue
 
                 if "partial_key" in data.decode("utf-8") \
                         and re.findall(r'\d+', data.decode("utf-8"))[1] != 0 \
                         and opponent_partial == 0:
                     numbers = re.findall(r'\d+', data.decode("utf-8"))
                     opponent_partial = int(numbers[1])
-                    print("PARTIAL opponent key : ", opponent_partial)
+                    print("opponent's PARTIAL key : ", opponent_partial)
                     # time.sleep(0.2)
                     connected = True
 
-                if my_partial != 0 and my_public != 0 and my_private != 0 and opponent_public != 0 and opponent_partial != 0:
+                if opponent_partial != 0:
                     full_key = dh_endpoint.generate_full_key(opponent_partial)
-                    print("MY FULL:", full_key)
-                    print("end-to-end connection established. you can chat now!")
+                    print("my FULL key : ", full_key)
+                    print("End-to-end connection established. you can chat now!"
+                          + "\n--------------------------------------------------"
+                          + "\n\n>")
                     established = True
                     break
 
-
                 # End
                 time.sleep(0.2)
-
         except:
             pass
+    lock.release()
 
 
 def receiving(name, sock):
@@ -80,7 +84,8 @@ def receiving(name, sock):
     global my_partial
     global full_key
 
-    time.sleep(5)
+    # time.sleep(5)
+    lock.acquire()
     while not shutdown:
         try:
             while True:
@@ -97,50 +102,48 @@ def receiving(name, sock):
                         decrypt += i
                     else:
                         decrypt += chr(ord(i) ^ full_key)
-                print(decrypt)
+
+                try:
+                    found = re.search('\d#(.+)', decrypt).group(1)
+                except AttributeError:
+                    # \d# not found in the original string
+                    found = ''
+                print(found)
                 # End
                 time.sleep(0.2)
         except:
             pass
+    lock.release()
 
 
 host = socket.gethostbyname(socket.gethostname())
 port = 0
 server = (host, 9090)
 
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.bind((host, port))
-s.setblocking(0)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((host, port))
+sock.setblocking(0)
 
+alias = util.input_string_name()
 
-def hasNumbers(inputString):
-    return bool(re.search(r'\d', inputString))
-
-
-alias = input("Set your name ")
-while alias == "" or hasNumbers(alias):
-    if alias == "" or hasNumbers(alias):
-        print("This is not a valid name. Only [A-Za-z] allowed!")
-    alias = input("Set your name ")
-
-establishSecureConnectionThread = threading.Thread(target=establishE2E, args=("SecurThread", s))
+establishSecureConnectionThread = threading.Thread(target=establishE2E, args=("E2EThread", sock))
 establishSecureConnectionThread.start()
-receivingThread = threading.Thread(target=receiving, args=("RecvThread", s))
+receivingThread = threading.Thread(target=receiving, args=("RecvThread", sock))
 receivingThread.start()
-
 
 # messaging
 while not shutdown:
     if not join:
-        s.sendto(("[" + alias + "] => joined chat ").encode("utf-8"), server)
+        sock.sendto(("[" + alias + "] => joined chat ").encode("utf-8"), server)
         join = True
     elif not connected:
-        s.sendto(("[" + alias + "] => my user public_key is " + str(my_public)).encode("utf-8"), server)
+        sock.sendto(("[" + alias + "] => my user public_key is " + str(my_public)).encode("utf-8"), server)
         # s.sendto(("[" + alias + "] => my user partial_key is " + str(my_partial)).encode("utf-8"), server)
         time.sleep(0.2)
     else:
         try:
-            message = input()
+            message = input(">\n")
+            # print('[you]: ' + message)
 
             # Begin
             crypt = ""
@@ -150,13 +153,13 @@ while not shutdown:
             # End
 
             if message != "":
-                s.sendto(("[" + alias + "] says: " + message).encode("utf-8"), server)
+                sock.sendto(("[" + alias + "] says: " + message).encode("utf-8"), server)
 
             time.sleep(0.2)
         except:
-            s.sendto(("[" + alias + "] <= left chat ").encode("utf-8"), server)
+            sock.sendto(("[" + alias + "] <= left chat ").encode("utf-8"), server)
             shutdown = True
 
 establishSecureConnectionThread.join()
 receivingThread.join()
-s.close()
+sock.close()
